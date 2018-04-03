@@ -19,3 +19,9 @@ This call will process all the `"jpg,png"` files with a confidence threshold of 
 rosrun ros_deep_net_client image_object_detect_client.py <source_path> <confidence_threshold> <destination_path> <file_extensions> <excluded_words>
 ```
 This call will process all the files with extensions `<file_extensions>` located under the `<source_path>` and outputs the results under `<destination_path>` based on `<confidence threshold>` . User can skip images with excluded words specified by parameter `<excuded_words>` .
+
+TODO
+---
+* Add information for url Usage
+* Verbose process steps
+* Code cleanup
