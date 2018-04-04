@@ -14,6 +14,28 @@ import copy
 import json
 from os.path import expanduser
 import argparse
+import datetime
+from rospy_message_converter import json_message_converter
+
+
+def save_data(image,json_str,filename,output_dir):
+
+    image_filename = filename+".jpg"
+
+    #print image_filename, output_dir
+
+    image_path = os.path.join(output_dir,image_filename)
+
+    json_filename = filename+".json"
+
+    json_path = os.path.join(output_dir,json_filename)
+
+    cv2.imwrite(image_path,image)
+
+    with open(json_path ,'w') as f:
+        f.write(json.dumps(json.loads(json_str),indent=4))
+
+
 
 def parse_arguments():
 
@@ -21,7 +43,9 @@ def parse_arguments():
 
     home = expanduser("~")
 
-    default_dest_path= os.path.join(home,"image_object_detect_results")
+    current_time= datetime.datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+
+    default_dest_path= os.path.join(home,"image_object_detect_results",current_time)
 
     parser.add_argument("source_path", help="source path for images")
 
@@ -33,28 +57,19 @@ def parse_arguments():
 
     parser.add_argument("excluded_words",help="words that need to be excluded in filenames", nargs='?', default="")
 
-
-
     return parser.parse_args()
-
-
 
 if __name__ == '__main__':
 
 
-    rospy.init_node('image_object_detect_client')
+    rospy.init_node('image_object_detect_node')
 
-    ''' Get the arguments. The first arguments are
-    <source_path> <destination_path> <file_extensions> <excluded_words>.
-    Excluded words are the labels that should not be included
-    in the filename such as depth, label, etc.
-
-    if len(sys.argv) < 5:
-        print "Insufficent number of arguments. Quitting..."
-        rospy.signal_shutdown(" Destination Path is not provided")
-        sys.exit(-1)
+    ''' Script that reads the images from the <source_path>, calls detected_objects
+    service and then outputs the results as image and json formats.
     '''
-    '''******* Check the file_crawl and detect_object services *******
+
+    '''
+    ******* Check the file_crawl and detect_object services *******
     '''
     try:
         rospy.wait_for_service('/ros_file_crawler/crawl_for_files', 5)
@@ -121,22 +136,22 @@ if __name__ == '__main__':
         paths = json.loads(resp_file.paths)
         names = json.loads(resp_file.filenames)
 
-        print names
+        #print names
 
         for file_extension in file_extensions:
 
             if file_extension in names.keys():
 
+                rospy.loginfo("Processing extension {}".format(file_extension))
+
                 paths_for_extension = paths[file_extension]
                 filenames_for_extension = names[file_extension]
 
-                for afile in paths_for_extension:
-
+                for i,afile in enumerate(paths_for_extension):
+                    rospy.loginfo("Processing image {} of {}".format(i+1,len(paths_for_extension)))
                     image = cv2.imread(afile)
                     cv_images.append(image)
-                    #cv2.imshow("im", image)
-                    #cv2.waitKey(5)
-                    #pub = rospy.Publisher('image', Image, queue_size=1)
+
                     if image.shape[0] > 64 and image.shape[1] > 64:
                     	msg = Image()
                     	msg.header.stamp = rospy.Time.now()
@@ -149,17 +164,28 @@ if __name__ == '__main__':
 
                 detect_objects = rospy.ServiceProxy('/deep_object_detection/detect_objects', DetectObjects)
                 resp = detect_objects(images," ",confidence_threshold)
+
                 #print resp.objects
                 for i in range(len(images)):
                     image = cv_images[i]
+                    objects_json = '{"objects":[ '
                     for obj in resp.objects:
                         if int(obj.imageID) == i:
+                            json_str = json_message_converter.convert_ros_message_to_json(obj)
+                            json_str += ','
+                            objects_json += json_str
+
                             cv2.rectangle(image,(obj.x,obj.y),(obj.x+obj.width, obj.y+obj.height),color=(255,255,0),thickness=2)
                             text = obj.label + "_" +"%.2f"%obj.confidence
                             cv2.putText(image,text,(obj.x+obj.width/4,obj.y+obj.height/2),cv2.FONT_HERSHEY_SIMPLEX,0.5,color=(255,0,0),thickness=1)
-                    filename = "processed_image_"+str(i)+".jpg"
-                    fullpath = os.path.join(dest_path,filename)
-                    cv2.imwrite(fullpath,image)
+
+                    ''' Remove the last comma '''
+                    objects_json = objects_json[:-1]
+                    objects_json += ' ]}'
+
+                    filename = filenames_for_extension[i].split(".")[0]
+
+                    save_data(image,objects_json,filename,dest_path)
 
     except Exception as e:
         rospy.logwarn("Service call failed: {}".format(e))
